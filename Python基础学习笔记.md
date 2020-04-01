@@ -352,6 +352,6 @@ This is Child.
 
 
 
-笔记源自：深度学习之PyTorch实战计算机视觉-唐进敏
+笔记源自：深度学习之PyTorch实战计算机视觉-唐进民
 
 Write by sheen
