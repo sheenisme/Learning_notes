@@ -61,3 +61,7 @@ print(torch.cuda.is_available()) #true即为可用
 https://blog.csdn.net/SpadgerZ/article/details/89468756
 
 https://blog.csdn.net/baidu_26646129/article/details/88380598
+
+
+
+Write by sheen
