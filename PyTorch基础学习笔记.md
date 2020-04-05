@@ -2,7 +2,7 @@
 
 > PyTorch是美国互联网巨头Facebook在深度学习框架Torch的基础上使用Python重写的一个全新的深度学习框架，它更像NumPy的替代产物，不仅继承了NumPy的众多优点，还支持GPUs计算，在计算效率上要比NumPy有更明显的优势；不仅如此，PyTorch还有许多高级功能，比如拥有丰富的API，可以快速完成深度神经网络模型的搭建和训练。
 
-#### 一、Tensor
+#### 一、Tensor（张量）
 
 > Tensor在PyTorch中负责存储基本数据，PyTorch针对Tensor也提供了丰富的函数和方法，所以PyTorch中的Tensor与NumPy的数组具有极高的相似性。Tensor是一种高级的API，我们在使用Tensor时并不用了解PyTorch中的高层次架构，也不用明白什么是深度学习、什么是后向传播、如何对模型进行优化、什么是计算图等技术细节。更重要的是，在PyTorch中定义的Tensor数据类型的变量还可以在GPUs上进行运算，而且只需对变量做一些简单的类型转换就能够轻易实现。
 
@@ -146,9 +146,9 @@ for epoch in range(epoch_n):
     "之后的代码部分就是通过实现后向传播来对权重参数进行优化了，为了计算方便，我们的代码实现使用的是每个节点的链式求导结果，"
     "在通过计算之后，就能够得到每个权重参数对应的梯度分别是grad_w1和grad_w2。"
     grad_y_pred = 2 * (y_pred - y)
-    grad_w2 = h1.t().mm(grad_y_pred)
-    
-    grad_h = grad_y_pred.clone()
+    grad_w2 = h1.t().mm(grad_y_pred)   # tensor.t()是实现转置
+
+    grad_h = grad_y_pred.clone()       # tensor.clone()返回一个张量的副本，其与原张量的尺寸和数据类型相同
     grad_h = grad_h.mm(w2.t())
     grad_h.clamp_(min=0)
     grad_w1 = x.t().mm(grad_h)
@@ -185,6 +185,180 @@ Epoch:19, Loss:849140.9375
 
 loss值从之前的巨大误差逐渐缩减，这说明我们的模型经过20次训练和权重参数优化之后，得到的预测的值和真实值之间的差距越来越小了。
 
+#### 三、自动梯度（torch.autograd）
 
+> 对于深度的神经网络模型的前向传播使用简单的代码就能实现，但是很难实现涉及该模型中后向传播梯度计算部分的代码，其中最困难的就是对模型计算逻辑的梳理。
+>
+> 通过使用torch.autograd包，可以使模型参数自动计算在优化过程中需要用到的梯度值，在很大程度上帮助降低了实现后向传播代码的复杂度。
+
+torch.autograd包的主要功能是完成神经网络后向传播中的链式求导，手动实现链式求导的代码会给我们带来很大的困扰，而torch.autograd包中丰富的类减少了这些不必要的麻烦。**实现自动梯度功能的过程大致为：先通过输入的Tensor数据类型的变量在神经网络的前向传播过程中生成一张计算图，然后根据这个计算图和输出结果准确计算出每个参数需要更新的梯度，并通过完成后向传播完成对参数的梯度更新。**
+
+在实践中完成自动梯度需要用到torch.autograd包中的Variable类对我们定义的Tensor数据类型变量进行封装，在封装后，计算图中的各个节点就是一个Variable对象，这样才能应用自动梯度的功能。
+
+如果已经按照如上方式完成了相关操作，则在选中了计算图中的某个节点时，这个节点必定会是一个Variable对象，用X来代表我们选中的节点，那么X.data代表Tensor数据类型的变量，X.grad也是一个Variable对象，不过它表示的是X的梯度，在想访问梯度值时需要使用X.grad.data。
+
+我们下面也搭建一个二层结构的神经网络模型，便于和上面对比：
+
+```
+import torch
+from torch.autograd import Variable
+
+batch_n = 100
+hidden_layer = 100
+input_data = 1000
+output_data = 10
+
+x = Variable(torch.randn(batch_n, input_data), requires_grad=False)
+y = Variable(torch.randn(batch_n, output_data), requires_grad=False)
+
+w1 = Variable(torch.randn(input_data, hidden_layer), requires_grad=True)
+w2 = Variable(torch.randn(hidden_layer, output_data), requires_grad=True)
+"Variable(torch.randn(batch_n, input_data), requires_grad=False) 这段代码就是之前讲到的用Variable类对Tensor数据类型变量进行封装的操作。"
+"在以上代码中还使用了一个requires_grad参数，这个参数的赋值类型是布尔型，如果requires_grad的值是False，那么表示该变量在进行自动梯度计算的过程中不会保留梯度值。"
+"我们将输入的数据x和输出的数据y的requires_grad参数均设置为False，这是因为这两个变量并不是我们的模型需要优化的参数，而两个权重w1和w2的requires_grad参数的值为True。"
+
+epoch_n = 20
+learning_rate = 1e-6
+
+for epoch in range(epoch_n):
+    y_pred = x.mm(w1).clamp(min=0).mm(w2)
+    loss = (y_pred - y).pow(2).sum()
+    print("Epoch:{}, Loss:{:.4f}".format(epoch, loss.data))
+
+    loss.backward()
+
+    w1.data -= learning_rate*w1.grad.data
+    w2.data -= learning_rate*w2.grad.data
+
+    w1.grad.data.zero_()
+    w2.grad.data.zero_()
+
+```
+
+*之前代码中的后向传播计算部分变成了新代码中的loss.backward()，这个函数的功能在于让模型根据计算图自动计算每个节点的梯度值并根据需求进行保留，有了这一步，我们的权重参数w1.data和w2.data就可以直接使用在自动梯度过程中求得的梯度值w1.data.grad和w2.data.grad，并结合学习速率来对现有的参数进行更新、优化了。*
+
+*在代码的最后还要将本次计算得到的各个参数节点的梯度值通过grad.data.zero_()全部置零，如果不置零，则计算的梯度值会被一直累加，这样就会影响到后续的计算。*
+
+在运行后，输出的内容如下：
+
+```
+Epoch:0, Loss:47338116.0000
+Epoch:1, Loss:97949408.0000
+Epoch:2, Loss:374966656.0000
+Epoch:3, Loss:746421376.0000
+Epoch:4, Loss:56399544.0000
+Epoch:5, Loss:20339994.0000
+Epoch:6, Loss:11709585.0000
+Epoch:7, Loss:7755887.0000
+Epoch:8, Loss:5540422.5000
+Epoch:9, Loss:4160533.2500
+Epoch:10, Loss:3238873.2500
+Epoch:11, Loss:2592523.7500
+Epoch:12, Loss:2122478.2500
+Epoch:13, Loss:1771840.0000
+Epoch:14, Loss:1504529.2500
+Epoch:15, Loss:1296778.1250
+Epoch:16, Loss:1132661.2500
+Epoch:17, Loss:1001148.3125
+Epoch:18, Loss:894226.1250
+Epoch:19, Loss:806185.3125
+```
+
+从结果来看，对参数的优化在顺利进行，因为loss值也越来越低了。
+
+#### 四、自定义传播函数
+
+> 除了可以采用自动梯度方法，我们还可以通过构建一个继承了torch.nn.Module的新类，来完成对前向传播函数和后向传播函数的重写。在这个新类中，我们使用forward作为前向传播函数的关键字，使用backward作为后向传播函数的关键字。
+
+```
+import torch
+from torch.autograd import Variable
+
+batch_n = 64
+hidden_layer = 100
+input_data = 1000
+output_data = 10
+
+"首先通过classModel(torch.nn. Module)完成了类继承的操作，之后分别是类的初始化，以及forward函数和backward函数。"
+"forward函数实现了模型的前向传播中的矩阵运算，backward实现了模型的后向传播中的自动梯度计算，"
+"后向传播如果没有特别的需求，则在一般情况下不用进行调整。在定义好类之后，我们就可以对其进行调用了"
+
+class Model(torch.nn.Module):
+    def __init__(self):
+        super(Model, self).__init__()
+
+    def forward(self, input, w1, w2):
+        x = torch.mm(input, w1)
+        x = torch.clamp(x, min=0)
+        x = torch.mm(x, w2)
+        return x
+
+    def backward(self):
+        pass
+        return
+
+
+model = Model()
+
+x = Variable(torch.randn(batch_n, input_data), requires_grad=False)
+y = Variable(torch.randn(batch_n, output_data), requires_grad=False)
+
+w1 = Variable(torch.randn(input_data, hidden_layer), requires_grad=True)
+w2 = Variable(torch.randn(hidden_layer, output_data), requires_grad=True)
+
+epoch_n = 30
+learning_rate = 1e-6
+
+for epoch in range(epoch_n):
+    # 模型通过“y_pred = model(x, w1, w2)”来完成对模型预测值的输出，并且整个训练部分的代码被简化了
+    y_pred = model(x, w1, w2)
+
+    loss = (y_pred - y).pow(2).sum()
+    print("Epoch:{}, Loss:{:.4f}".format(epoch, loss.data))
+    loss.backward()
+
+    w1.data -= learning_rate * w1.grad.data
+    w2.data -= learning_rate * w2.grad.data
+
+    w1.grad.data.zero_()
+    w2.grad.data.zero_()
+```
+
+在运行后，输出的内容如下：
+
+```
+Epoch:0, Loss:28151866.0000
+Epoch:1, Loss:24739038.0000
+Epoch:2, Loss:25950180.0000
+Epoch:3, Loss:27835844.0000
+Epoch:4, Loss:27276116.0000
+Epoch:5, Loss:22496930.0000
+Epoch:6, Loss:15407659.0000
+Epoch:7, Loss:8983852.0000
+Epoch:8, Loss:4875907.5000
+Epoch:9, Loss:2690179.0000
+Epoch:10, Loss:1615441.5000
+Epoch:11, Loss:1082076.7500
+Epoch:12, Loss:798210.6250
+Epoch:13, Loss:630277.8750
+Epoch:14, Loss:519263.3438
+Epoch:15, Loss:438640.0938
+Epoch:16, Loss:376149.4688
+Epoch:17, Loss:325793.0312
+Epoch:18, Loss:284095.4375
+Epoch:19, Loss:249010.8906
+Epoch:20, Loss:219174.5469
+Epoch:21, Loss:193616.3125
+Epoch:22, Loss:171656.0625
+Epoch:23, Loss:152690.8281
+Epoch:24, Loss:136200.7969
+Epoch:25, Loss:121802.2422
+Epoch:26, Loss:109181.9062
+Epoch:27, Loss:98082.3125
+Epoch:28, Loss:88291.6172
+Epoch:29, Loss:79632.8047
+```
+
+从结果来看，对参数的优化同样在顺利进行，每次输出的loss值也在逐渐减小
 
 Write by sheen
